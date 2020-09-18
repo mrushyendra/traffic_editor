@@ -67,7 +67,7 @@ double compute_ds(
       next_s = -deceleration * dt + v_actual;
     }
   }
-
+  //std::cout << "next_s return: " << next_s << std::endl;
   // Flip the sign the to correct direction before returning the value
   return sign * next_s;
 }

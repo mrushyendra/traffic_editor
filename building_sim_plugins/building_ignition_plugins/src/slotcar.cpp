@@ -9,6 +9,10 @@
 #include <ignition/gazebo/components/Pose.hh>
 #include <ignition/gazebo/components/Static.hh>
 #include <ignition/gazebo/components/AxisAlignedBox.hh>
+#include <ignition/gazebo/components/LinearVelocityCmd.hh>
+#include <ignition/gazebo/components/AngularVelocityCmd.hh>
+#include <ignition/gazebo/components/LinearVelocity.hh>
+#include <ignition/gazebo/components/AngularVelocity.hh>
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -40,6 +44,8 @@ private:
 
   rclcpp::Node::SharedPtr _ros_node;
   Entity _entity;
+  double prev_time = 0;
+  double curr_time = 0;
 
   std::array<Entity, 2> joints;
   std::unique_ptr<rclcpp::executors::MultiThreadedExecutor> executor;
@@ -50,17 +56,20 @@ private:
     const std::pair<double, double>& velocities,
     const double dt)
   {
-    std::array<double, 2> w_tire;
-    for (std::size_t i = 0; i < 2; ++i)
-      w_tire[i] =
-        ecm.Component<components::JointVelocity>(joints[i])->Data()[0];
-    auto joint_signals = dataPtr->calculate_control_signals(w_tire,
-        velocities, dt);
-    for (std::size_t i = 0; i < 2; ++i)
-    {
-      auto vel_cmd = ecm.Component<components::JointVelocityCmd>(joints[i]);
-      vel_cmd->Data()[0] = joint_signals[i];
-    }
+    if (!ecm.EntityHasComponentType(_entity,
+      components::LinearVelocityCmd().TypeId()))
+      ecm.CreateComponent(_entity, components::LinearVelocityCmd({0,0,0}));
+    if (!ecm.EntityHasComponentType(_entity,
+      components::AngularVelocityCmd().TypeId()))
+      ecm.CreateComponent(_entity, components::AngularVelocityCmd({0,0,0}));
+
+    double v_robot = ecm.Component<components::LinearVelocityCmd>(_entity)->Data()[0];
+    double w_robot = ecm.Component<components::AngularVelocityCmd>(_entity)->Data()[2];
+
+    std::array<double, 2> target_vels;
+    target_vels = dataPtr->calculate_model_control_signals({v_robot, w_robot}, velocities, dt);
+    ecm.Component<components::LinearVelocityCmd>(_entity)->Data() = {target_vels[0],0,0};
+    ecm.Component<components::AngularVelocityCmd>(_entity)->Data() = {0,0,target_vels[1]};
   }
 
   void init_infrastructure(EntityComponentManager& ecm);
@@ -207,6 +216,16 @@ void SlotcarPlugin::PreUpdate(const UpdateInfo& info,
 
   auto velocities =
     dataPtr->update(convert_pose(pose), obstacle_positions, time);
+ 
+  curr_time = time;
+  /*if(time - prev_time >= 1)
+  {
+    prev_time = time;
+    std::cout << "current actual velocity: " << ecm.Component<components::LinearVelocity>(_entity)->Data()[0] << ",  " << ecm.Component<components::AngularVelocity>(_entity)->Data()[2] << std::endl;
+
+    std::cout << "target velocities: " << velocities.first << " " << velocities.second << std::endl;
+    prev_time = time;
+  }*/
 
   send_control_signals(ecm, velocities, dt);
 }

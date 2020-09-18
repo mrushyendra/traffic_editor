@@ -101,9 +101,19 @@ public:
     const Eigen::Vector3d& current_heading);
 
   std::array<double, 2> calculate_control_signals(const std::array<double,
-    2>& w_tire,
+    2>& curr_velocities,
     const std::pair<double, double>& velocities,
-    const double dt) const;
+    const double dt);// const;
+
+  std::array<double, 2> calculate_joint_control_signals(
+    const std::array<double, 2>& w_tire,
+    const std::pair<double, double>& velocities,
+    const double dt);// const
+
+  std::array<double, 2> calculate_model_control_signals(
+    const std::array<double, 2>& curr_velocities,
+    const std::pair<double, double>& velocities,
+    const double dt);// const
 
   void publish_robot_state(const double time);
 
@@ -117,6 +127,7 @@ private:
 
   rclcpp::Node::SharedPtr _ros_node;
 
+  double old_time = 0.0;
   double _last_update_time = 0.0;
   double last_tf2_pub = 0.0;
   double last_topic_pub = 0.0;

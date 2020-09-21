@@ -89,10 +89,9 @@ bool DoorCommon::all_doors_open()
 {
   for (const auto& door : _doors)
     if (std::abs(door.second.open_position
-      - door.second.current_position) > _params.dx_min)
+      - door.second.current_position) > _params.dx_min){
       return false;
-
-
+      }
 
   return true;
 }
@@ -103,8 +102,6 @@ bool DoorCommon::all_doors_closed()
     if (std::abs(door.second.closed_position
       - door.second.current_position) > _params.dx_min)
       return false;
-
-
 
   return true;
 }

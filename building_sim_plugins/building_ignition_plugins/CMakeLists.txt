@@ -41,6 +41,7 @@ ign_find_package(ignition-math4 REQUIRED)
 ign_find_package(sdformat9 REQUIRED)
 set(IGN_MATH_VER 4)
 
+find_package(Eigen3 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -90,6 +91,7 @@ target_include_directories(door
     ${building_sim_common_INCLUDE_DIRS}
     ${geometry_msgs_INCLUDE_DIRS}
     ${rmf_door_msgs_INCLUDE_DIRS}
+    ${EIGEN3_INCLUDE_DIRS}
 )
 
 target_link_libraries(door
@@ -102,6 +104,7 @@ target_link_libraries(door
     ${rmf_fleet_msgs_LIBRARIES}
     #${geometry_msgs_LIBRARIES}
     #${tf2_ros_LIBRARIES}
+    ${EIGEN3_LIBRARIES}
 )
 
 ###############################

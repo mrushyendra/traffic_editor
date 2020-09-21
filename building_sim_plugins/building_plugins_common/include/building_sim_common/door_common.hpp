@@ -180,6 +180,7 @@ std::shared_ptr<DoorCommon> DoorCommon::make(
       door_name.c_str());
     return nullptr;
   }
+  // to add 'left' and 'right' element detection, add to DoorElem class
 
   if ((left_door_joint_name == "empty_joint" &&
     right_door_joint_name == "empty_joint") ||

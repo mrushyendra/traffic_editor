@@ -123,9 +123,9 @@ private:
     const double dt);
 
   DoorCommon(const std::string& door_name,
+    const Doors& doors,
     rclcpp::Node::SharedPtr node,
-    const MotionParams& params,
-    const Doors& doors);
+    const MotionParams& params);
 
   bool all_doors_open();
 
@@ -256,9 +256,9 @@ std::shared_ptr<DoorCommon> DoorCommon::make(
 
   std::shared_ptr<DoorCommon> door_common(new DoorCommon(
       door_name,
+      doors,
       node,
-      params,
-      doors));
+      params));
 
   return door_common;
 

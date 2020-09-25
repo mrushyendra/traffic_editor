@@ -109,26 +109,6 @@ void SlotcarPlugin::Configure(const Entity& entity,
   //executor->spin();
   dataPtr->init_ros_node(_ros_node);
 
-  joints[0] = model.JointByName(ecm, "joint_tire_left");
-  if (!joints[0])
-    RCLCPP_ERROR(dataPtr->logger(),
-      "Could not find tire for [joint_tire_left]");
-
-  joints[1] = model.JointByName(ecm, "joint_tire_right");
-  if (!joints[1])
-    RCLCPP_ERROR(dataPtr->logger(),
-      "Could not find tire for [joint_tire_right]");
-
-  // Initialise JointVelocityCmd / JointVelocity components for velocity control
-  for (const auto& joint : joints)
-  {
-    if (!ecm.EntityHasComponentType(joint,
-      components::JointVelocityCmd().TypeId()))
-      ecm.CreateComponent(joint, components::JointVelocityCmd({0}));
-    if (!ecm.EntityHasComponentType(joint,
-      components::JointVelocity().TypeId()))
-      ecm.CreateComponent(joint, components::JointVelocity({0}));
-  }
   // Initialize Pose3d component
   if (!ecm.EntityHasComponentType(entity, components::Pose().TypeId()))
     ecm.CreateComponent(entity, components::Pose());

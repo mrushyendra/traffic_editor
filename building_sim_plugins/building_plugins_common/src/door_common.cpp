@@ -61,12 +61,12 @@ void DoorCommon::publish_state(const uint32_t door_value,
 
 
 DoorCommon::DoorCommon(const std::string& door_name,
+  const Doors& doors,
   rclcpp::Node::SharedPtr node,
-  const MotionParams& params,
-  const Doors& doors)
-: _ros_node(std::move(node)),
-  _params(params),
-  _doors(doors)
+  const MotionParams& params)
+: _doors(doors),
+  _ros_node(std::move(node)),
+  _params(params)
 {
   _state.door_name = door_name;
   _request.requested_mode.value = DoorMode::MODE_CLOSED;

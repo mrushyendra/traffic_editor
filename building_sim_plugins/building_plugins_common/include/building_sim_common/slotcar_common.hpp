@@ -31,9 +31,6 @@
 #include <rmf_fleet_msgs/msg/mode_request.hpp>
 #include <building_map_msgs/msg/building_map.hpp>
 #include <charge_msgs/msg/charge_state.hpp>
-//#include <rmf_battery/agv/BatterySystem.hpp>
-//#include <rmf_traffic/Motion.hpp>
-//#include <rmf_traffic/Time.hpp>
 
 namespace building_sim_common {
 
@@ -132,7 +129,9 @@ public:
   void publish_robot_state(const double time);
 
 private:
-  struct SlotcarParams
+  // Paramters needed for power dissipation and charging calculations
+  // Default values may be overriden using values from sdf file
+  struct PowerParams
   {
     double nominal_voltage = 12; // V
     double nominal_capacity = 24; // Ah
@@ -148,7 +147,8 @@ private:
   {
     double x;
     double y;
-    ChargerWaypoint(double x, double y) : x(x), y(y)
+    ChargerWaypoint(double x, double y)
+    : x(x), y(y)
     {
     }
   };
@@ -190,7 +190,8 @@ private:
   rclcpp::Subscription<rmf_fleet_msgs::msg::ModeRequest>::SharedPtr _mode_sub;
   rclcpp::Subscription<building_map_msgs::msg::BuildingMap>::SharedPtr
     _building_map_sub;
-  rclcpp::Subscription<charge_msgs::msg::ChargeState>::SharedPtr _charge_state_sub;
+  rclcpp::Subscription<charge_msgs::msg::ChargeState>::SharedPtr
+    _charge_state_sub;
 
   rmf_fleet_msgs::msg::RobotMode _current_mode;
 
@@ -216,12 +217,13 @@ private:
   double _stop_distance = 1.0;
   double _stop_radius = 1.0;
 
-  SlotcarParams _params;
-  bool _enable_charge = false;
+  PowerParams _params;
+  bool _enable_charge = true;
   bool _enable_instant_charge = false;
-  bool _enable_drain = false;
+  bool _enable_drain = true;
   double _soc = 100.0;
-  std::unordered_map<std::string, std::vector<ChargerWaypoint>> charger_waypoints;
+  std::unordered_map<std::string, std::vector<ChargerWaypoint>>
+  charger_waypoints;
   static constexpr double _charger_dist_thres = 1; // Straight line distance to charging waypoint within which charging can occur
 
   std::string get_level_name(const double z) const;
@@ -313,33 +315,76 @@ void SlotcarCommon::read_sdf(SdfPtrT& sdf)
 
   if (sdf->HasElement("base_width"))
     _base_width = sdf->template Get<double>("base_width");
-  RCLCPP_INFO(logger(), "Setting base width to:" + std::to_string(_base_width));
+  RCLCPP_INFO(logger(),
+    "Setting base width to: " + std::to_string(_base_width));
+
+  if (sdf->HasElement("nominal_voltage"))
+    _params.nominal_voltage = sdf->template Get<double>("nominal_voltage");
+  RCLCPP_INFO(logger(),
+    "Setting nominal voltage to: " + std::to_string(_params.nominal_voltage));
+
+  if (sdf->HasElement("nominal_capacity"))
+    _params.nominal_capacity = sdf->template Get<double>("nominal_capacity");
+  RCLCPP_INFO(logger(),
+    "Setting nominal capacity to: " + std::to_string(_params.nominal_capacity));
+
+  if (sdf->HasElement("charging_current"))
+    _params.charging_current = sdf->template Get<double>("charging_current");
+  RCLCPP_INFO(logger(),
+    "Setting charging current to: " + std::to_string(_params.charging_current));
+
+  if (sdf->HasElement("mass"))
+    _params.mass = sdf->template Get<double>("mass");
+  RCLCPP_INFO(logger(), "Setting mass to: " + std::to_string(_params.mass));
+
+  if (sdf->HasElement("inertia"))
+    _params.inertia = sdf->template Get<double>("inertia");
+  RCLCPP_INFO(logger(),
+    "Setting inertia to: " + std::to_string(_params.inertia));
+
+  if (sdf->HasElement("friction_coefficient"))
+    _params.friction_coefficient =
+      sdf->template Get<double>("friction_coefficient");
+  RCLCPP_INFO(logger(),
+    "Setting friction coefficient to: "
+    + std::to_string(_params.friction_coefficient));
+
+  if (sdf->HasElement("nominal_power"))
+    _params.nominal_power = sdf->template Get<double>("nominal_power");
+  RCLCPP_INFO(logger(),
+    "Setting nominal power to: " + std::to_string(_params.nominal_power));
+
+  if (sdf->HasElement("efficiency"))
+    _params.efficiency = sdf->template Get<double>("efficiency");
+  RCLCPP_INFO(logger(),
+    "Setting efficiency to: " + std::to_string(_params.efficiency));
 
   if (sdf->GetParent() && sdf->GetParent()->GetParent())
   {
     auto parent = sdf->GetParent()->GetParent(); // Brittle, perhaps change
     //std::cout << "parent is ....................... " << parent->GetName() << std::endl;
-    if(parent->HasElement("rmf:charger_waypoints"))
+    if (parent->HasElement("rmf:charger_waypoints"))
     {
       auto waypoints = parent->GetElement("rmf:charger_waypoints");
-      if(waypoints->HasElement("rmf:vertex"))
+      if (waypoints->HasElement("rmf:vertex"))
       {
         auto waypoint = waypoints->GetElement("rmf:vertex");
-        while(waypoint)
+        while (waypoint)
         {
           //std::cout << "waypoint: " << waypoint->GetName() << std::endl;
-          if(waypoint->HasAttribute("x") && waypoint->HasAttribute("y") && waypoint->HasAttribute("level"))
+          if (waypoint->HasAttribute("x") && waypoint->HasAttribute("y") &&
+            waypoint->HasAttribute("level"))
           {
             std::string x_val, y_val, lvl_name;
             waypoint->GetAttribute("x")->Get(x_val);
             waypoint->GetAttribute("y")->Get(y_val);
             waypoint->GetAttribute("level")->Get(lvl_name);
 
-            double x,y;
+            double x, y;
             std::stringstream ss;
             ss << x_val << y_val;
             ss >> x >> y; // to set precision
-            charger_waypoints[lvl_name].push_back(ChargerWaypoint(x,y));
+            charger_waypoints[lvl_name].push_back(ChargerWaypoint(x, y));
             //std::cout << "x value: " << x_val << "y: " << y_val << " level: " << lvl_name << std::endl;
           }
           waypoint = waypoint->GetNextElement("rmf:vertex");

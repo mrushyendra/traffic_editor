@@ -1,4 +1,3 @@
-
 #include <string>
 #include <iostream>
 
@@ -20,25 +19,25 @@ class toggle_charging : public Plugin
 {
   Q_OBJECT
 
-  private:
-    rclcpp::Node::SharedPtr _ros_node;
-    bool _enable_charge = false;
-    bool _enable_instant_charge = false;
-    bool _enable_drain = false;
-    rclcpp::Publisher<ChargeState>::SharedPtr _charge_state_pub;
+private:
+  rclcpp::Node::SharedPtr _ros_node;
+  bool _enable_charge = true;
+  bool _enable_instant_charge = false;
+  bool _enable_drain = true;
+  rclcpp::Publisher<ChargeState>::SharedPtr _charge_state_pub;
 
-    void checkbox_checked();
+  void checkbox_checked();
 
-  protected slots:
-    void OnEnableCharge(bool);
-    void OnEnableInstantCharge(bool);
-    void OnEnableDrain(bool);
+protected slots:
+  void OnEnableCharge(bool);
+  void OnEnableInstantCharge(bool);
+  void OnEnableDrain(bool);
 
-  public:
-    toggle_charging();
+public:
+  toggle_charging();
 
-    virtual void LoadConfig(const tinyxml2::XMLElement *_pluginElem)
-        override;
+  virtual void LoadConfig(const tinyxml2::XMLElement* _pluginElem)
+  override;
 };
 
 toggle_charging::toggle_charging()
@@ -51,11 +50,11 @@ toggle_charging::toggle_charging()
     "/charge_state", rclcpp::SystemDefaultsQoS());
 }
 
-void toggle_charging::LoadConfig(const tinyxml2::XMLElement *_pluginElem)
+void toggle_charging::LoadConfig(const tinyxml2::XMLElement* _pluginElem)
 {
   if (!_pluginElem)
     return;
-  
+
   if (this->title.empty())
     this->title = "Toggle Charging";
 }
@@ -81,7 +80,6 @@ void toggle_charging::OnEnableDrain(bool checked)
 void toggle_charging::checkbox_checked()
 {
   ChargeState _state;
-  _state.time = rclcpp::Time {0, 0, RCL_ROS_TIME};
   _state.enable_charge = _enable_charge;
   _state.enable_drain = _enable_drain;
   _state.enable_instant_charge = _enable_instant_charge;
@@ -90,7 +88,7 @@ void toggle_charging::checkbox_checked()
 
 // Register this plugin
 IGNITION_ADD_PLUGIN(toggle_charging,
-                    ignition::gui::Plugin)
+  ignition::gui::Plugin)
 
 
 #include "toggle_charging.moc"

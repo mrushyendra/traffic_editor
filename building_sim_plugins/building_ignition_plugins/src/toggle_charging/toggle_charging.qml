@@ -44,7 +44,7 @@ ToolBar {
       Layout.columnSpan: 1
       Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
       Layout.leftMargin: 2
-      checked: false
+      checked: true
       onClicked: {
         toggle_charging.OnEnableCharge(checked)
       }
@@ -66,7 +66,7 @@ ToolBar {
       Layout.columnSpan: 1
       Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
       Layout.leftMargin: 2
-      checked: false
+      checked: true
       onClicked: {
         toggle_charging.OnEnableDrain(checked)
       }

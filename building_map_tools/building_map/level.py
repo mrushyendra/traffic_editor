@@ -156,7 +156,7 @@ class Level:
                 model_path,
                 self.transformed_vertices)
 
-    def generate_sdf_models(self, world_ele):
+    def generate_sdf_models(self, world_ele, nav_graphs):
         for model in self.models:
             model.generate(
                 world_ele,
@@ -166,7 +166,7 @@ class Level:
         # sniff around in our vertices and spawn robots if requested
         for vertex_idx, vertex in enumerate(self.vertices):
             if 'spawn_robot_type' in vertex.params:
-                self.generate_robot_at_vertex_idx(vertex_idx, world_ele)
+                self.generate_robot_at_vertex_idx(vertex_idx, world_ele, nav_graphs)
 
     def generate_doors(self, world_ele, options):
         for door_edge in self.doors:
@@ -193,7 +193,7 @@ class Level:
         if door:
             door.generate(world_ele, options)
 
-    def generate_robot_at_vertex_idx(self, vertex_idx, world_ele):
+    def generate_robot_at_vertex_idx(self, vertex_idx, world_ele, nav_graphs):
         vertex = self.transformed_vertices[vertex_idx]
         robot_type = vertex.params['spawn_robot_type'].value
         robot_name = vertex.params['spawn_robot_name'].value
@@ -208,13 +208,49 @@ class Level:
                     yaw += math.pi
                 break
 
-        include_ele = SubElement(world_ele, 'include')
+        model_ele = SubElement(world_ele, 'model', {'name': robot_name + '_spawn_site'})
+        include_ele = SubElement(model_ele, 'include')
         name_ele = SubElement(include_ele, 'name')
         name_ele.text = robot_name
         uri_ele = SubElement(include_ele, 'uri')
         uri_ele.text = f'model://{robot_type}'
         pose_ele = SubElement(include_ele, 'pose')
         pose_ele.text = f'{vertex.x} {vertex.y} {vertex.z} 0 0 {yaw}'
+
+        charger_waypoints_ele = SubElement(
+          model_ele,
+          'charger_waypoints',
+          {'name' : 'charger_waypoints'}
+        )
+        # Determine which nav graphs the robot could be a part of
+        nav_graphs_present = []
+        for idx, nav_graph in nav_graphs.items():
+          if self.find_vertex(vertex, nav_graph):
+            nav_graphs_present.append(idx)
+
+        # Add all charger waypoints present in the nav graphs the robot could be a part of
+        for nav_graph in [nav_graphs[idx] for idx in nav_graphs_present]:
+          for level_name, level_graph in nav_graph['levels'].items():
+            for vertex in level_graph['vertices']:
+              params = vertex[2]
+              if 'is_charger' in params and params['is_charger']:
+                vertex_name = params['name'] if 'name' in params else ''
+                SubElement(
+                  charger_waypoints_ele,
+                  'vertex',
+                  {'name' : vertex_name, 'x' : str(vertex[0]), 'y' : str(vertex[1]),
+                  'level' : level_name}
+                )
+
+    # Return True if `vertex` is present in the `nav_graph`
+    def find_vertex(self, vertex, nav_graph):
+      for level_name, level_graph in nav_graph['levels'].items():
+        for nav_graph_vertex in level_graph['vertices']:
+          name = nav_graph_vertex[2]['name'] if 'name' in nav_graph_vertex[2] else ''
+          if vertex.x == nav_graph_vertex[0] and (vertex.y == nav_graph_vertex[1]
+            and name == vertex.name):
+            return True
+      return False
 
     def generate_floors(self, world_ele, model_name, model_path):
         i = 0

@@ -200,10 +200,12 @@ class Building:
         tree = parse(template_path)
         sdf = tree.getroot()
 
+        nav_graphs = self.generate_nav_graphs()
+        
         world = sdf.find('world')
 
         for level_name, level in self.levels.items():
-            level.generate_sdf_models(world)  # todo: a better name
+            level.generate_sdf_models(world, nav_graphs)  # todo: a better name
             level.generate_doors(world, options)
 
             level_include_ele = SubElement(world, 'include')
@@ -222,6 +224,9 @@ class Building:
             lift.generate_shaft_doors(world)
             lift.generate_cabin(world, options)
 
+        # Add a list of all charger waypoints present in the building
+        # We also add a separate filtered list for each robot when generating 
+        # the robot model sdf, containing only those on its nav graphs
         charger_waypoints_ele = SubElement(
           world,
           'rmf:charger_waypoints',

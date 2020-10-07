@@ -54,6 +54,7 @@ private:
 
   void send_control_signals(EntityComponentManager& ecm,
     const std::pair<double, double>& velocities,
+    std::vector<Entity> payloads,
     const double dt)
   {
     if (!ecm.EntityHasComponentType(_entity,
@@ -70,11 +71,27 @@ private:
     target_vels = dataPtr->calculate_model_control_signals({v_robot, w_robot}, velocities, dt);
     ecm.Component<components::LinearVelocityCmd>(_entity)->Data() = {target_vels[0],0,0};
     ecm.Component<components::AngularVelocityCmd>(_entity)->Data() = {0,0,target_vels[1]};
+
+    for(Entity& payload : payloads)
+    {
+      if (!ecm.EntityHasComponentType(payload,
+        components::LinearVelocityCmd().TypeId()))
+        ecm.CreateComponent(payload, components::LinearVelocityCmd({0,0,0}));
+      if (!ecm.EntityHasComponentType(payload,
+        components::AngularVelocityCmd().TypeId()))
+        ecm.CreateComponent(payload, components::AngularVelocityCmd({0,0,0}));
+
+      ecm.Component<components::LinearVelocityCmd>(payload)->Data() = {target_vels[0],0,0};
+      ecm.Component<components::AngularVelocityCmd>(payload)->Data() = {0,0,target_vels[1]};
+    }
   }
 
   void init_infrastructure(EntityComponentManager& ecm);
 
   std::vector<Eigen::Vector3d> get_obstacle_positions(
+    EntityComponentManager& ecm);
+  std::vector<Entity> get_payloads(
+    ignition::math::Pose3d& slotcar_pose,
     EntityComponentManager& ecm);
 };
 
@@ -176,6 +193,41 @@ std::vector<Eigen::Vector3d> SlotcarPlugin::get_obstacle_positions(
   return obstacle_positions;
 }
 
+std::vector<Entity> SlotcarPlugin::get_payloads(
+  ignition::math::Pose3d& slotcar_pose,
+  EntityComponentManager& ecm)
+{
+  std::vector<Entity> payloads;
+  ecm.Each<components::Model, components::Name, components::Pose,
+    components::Static>(
+    [&](const Entity& entity,
+    const components::Model*,
+    const components::Name* nm,
+    const components::Pose* pose,
+    const components::Static* is_static
+    ) -> bool
+    {
+      // Object should not be static
+      // It should not be part of infrastructure (doors / lifts)
+      // And it should be closer than the "stop" range (checked by common)
+      const auto payload_position = pose->Data().Pos();
+      if (is_static->Data() == false &&
+      _infrastructure.find(entity) == _infrastructure.end())
+      {
+        ignition::math::Vector3d vec_diff = slotcar_pose.CoordPositionSub(pose->Data());
+        float dist = vec_diff.Length();
+        //std::cout << "checking item: " << nm->Data() << "dist: " << dist << std::endl;
+        if(dist < 0.4)
+        {
+          std::cout << "adding payload: " << nm->Data() << std::endl;
+          payloads.push_back(entity);
+        }
+      }
+      return true;
+    });
+  return payloads;
+}
+
 void SlotcarPlugin::PreUpdate(const UpdateInfo& info,
   EntityComponentManager& ecm)
 {
@@ -193,6 +245,7 @@ void SlotcarPlugin::PreUpdate(const UpdateInfo& info,
 
   auto pose = ecm.Component<components::Pose>(_entity)->Data();
   auto obstacle_positions = get_obstacle_positions(ecm);
+  auto payloads = get_payloads(pose, ecm);
 
   auto velocities =
     dataPtr->update(convert_pose(pose), obstacle_positions, time);
@@ -207,7 +260,7 @@ void SlotcarPlugin::PreUpdate(const UpdateInfo& info,
     prev_time = time;
   }*/
 
-  send_control_signals(ecm, velocities, dt);
+  send_control_signals(ecm, velocities, payloads, dt);
 }
 
 IGNITION_ADD_PLUGIN(

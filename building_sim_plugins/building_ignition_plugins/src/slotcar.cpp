@@ -13,6 +13,10 @@
 #include <ignition/gazebo/components/AngularVelocityCmd.hh>
 #include <ignition/gazebo/components/LinearVelocity.hh>
 #include <ignition/gazebo/components/AngularVelocity.hh>
+#include <ignition/gazebo/components/PhysicsEnginePlugin.hh>
+
+#include <ignition/msgs.hh>
+#include <ignition/transport.hh>
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -22,6 +26,8 @@
 using namespace ignition::gazebo;
 
 using namespace building_sim_common;
+
+enum PhysicsEnginePlugin {DEFAULT, TPE};
 
 class IGNITION_GAZEBO_VISIBLE SlotcarPlugin
   : public System,
@@ -41,64 +47,69 @@ public:
 
 private:
   std::unique_ptr<SlotcarCommon> dataPtr;
-
+  ignition::transport::Node _ign_node;
   rclcpp::Node::SharedPtr _ros_node;
   Entity _entity;
-  double prev_time = 0;
-  double curr_time = 0;
+  std::unordered_set<Entity> _payloads;
 
   std::array<Entity, 2> joints;
   std::unique_ptr<rclcpp::executors::MultiThreadedExecutor> executor;
 
   std::unordered_set<Entity> _infrastructure;
+  PhysicsEnginePlugin phys_plugin;
 
   void send_control_signals(EntityComponentManager& ecm,
     const std::pair<double, double>& velocities,
-    std::vector<Entity> payloads,
+    const std::unordered_set<Entity> payloads,
     const double dt)
   {
     if (!ecm.EntityHasComponentType(_entity,
       components::LinearVelocityCmd().TypeId()))
-      ecm.CreateComponent(_entity, components::LinearVelocityCmd({0,0,0}));
+      ecm.CreateComponent(_entity, components::LinearVelocityCmd({0, 0, 0}));
     if (!ecm.EntityHasComponentType(_entity,
       components::AngularVelocityCmd().TypeId()))
-      ecm.CreateComponent(_entity, components::AngularVelocityCmd({0,0,0}));
+      ecm.CreateComponent(_entity, components::AngularVelocityCmd({0, 0, 0}));
 
-    double v_robot = ecm.Component<components::LinearVelocityCmd>(_entity)->Data()[0];
-    double w_robot = ecm.Component<components::AngularVelocityCmd>(_entity)->Data()[2];
+    double v_robot =
+      ecm.Component<components::LinearVelocityCmd>(_entity)->Data()[0];
+    double w_robot =
+      ecm.Component<components::AngularVelocityCmd>(_entity)->Data()[2];
 
     std::array<double, 2> target_vels;
-    target_vels = dataPtr->calculate_model_control_signals({v_robot, w_robot}, velocities, dt);
-    ecm.Component<components::LinearVelocityCmd>(_entity)->Data() = {target_vels[0],0,0};
-    ecm.Component<components::AngularVelocityCmd>(_entity)->Data() = {0,0,target_vels[1]};
+    target_vels = dataPtr->calculate_model_control_signals({v_robot, w_robot},
+      velocities, dt);
+    ecm.Component<components::LinearVelocityCmd>(_entity)->Data() = {target_vels[0], 0, 0};
+    ecm.Component<components::AngularVelocityCmd>(_entity)->Data() = {0, 0, target_vels[1]};
 
-    for(Entity& payload : payloads)
+    if(phys_plugin == TPE) // Need to manually move the payload
     {
-      if (!ecm.EntityHasComponentType(payload,
-        components::LinearVelocityCmd().TypeId()))
-        ecm.CreateComponent(payload, components::LinearVelocityCmd({0,0,0}));
-      if (!ecm.EntityHasComponentType(payload,
-        components::AngularVelocityCmd().TypeId()))
-        ecm.CreateComponent(payload, components::AngularVelocityCmd({0,0,0}));
+      for (const Entity& payload : payloads)
+      {
+        if (!ecm.EntityHasComponentType(payload,
+          components::LinearVelocityCmd().TypeId()))
+          ecm.CreateComponent(payload, components::LinearVelocityCmd({0, 0, 0}));
+        if (!ecm.EntityHasComponentType(payload,
+          components::AngularVelocityCmd().TypeId()))
+          ecm.CreateComponent(payload, components::AngularVelocityCmd({0, 0, 0}));
 
-      ecm.Component<components::LinearVelocityCmd>(payload)->Data() = {target_vels[0],0,0};
-      ecm.Component<components::AngularVelocityCmd>(payload)->Data() = {0,0,target_vels[1]};
+        ecm.Component<components::LinearVelocityCmd>(payload)->Data() = {target_vels[0], 0, 0};
+        ecm.Component<components::AngularVelocityCmd>(payload)->Data() = {0, 0, target_vels[1]};
+      }
     }
   }
 
   void init_infrastructure(EntityComponentManager& ecm);
+  void item_dispensed_cb(const ignition::msgs::UInt64_V& msg);
+  void item_ingested_cb(const ignition::msgs::UInt64& msg);
 
   std::vector<Eigen::Vector3d> get_obstacle_positions(
-    EntityComponentManager& ecm);
-  std::vector<Entity> get_payloads(
-    ignition::math::Pose3d& slotcar_pose,
     EntityComponentManager& ecm);
 };
 
 SlotcarPlugin::SlotcarPlugin()
 : dataPtr(std::make_unique<SlotcarCommon>())
 {
-  // We do initialization only during ::Configure
+  // We do initialization during ::Configure
 }
 
 SlotcarPlugin::~SlotcarPlugin()
@@ -134,6 +145,20 @@ void SlotcarPlugin::Configure(const Entity& entity,
     components::AxisAlignedBox().TypeId()))
   {
     ecm.CreateComponent(entity, components::AxisAlignedBox());
+  }
+
+  // Keep track of when a payload is dispensed onto/ingested from slotcar
+  // Needed for TPE Plugin in order to manually move payload by setting velocities
+  if (!_ign_node.Subscribe("/item_dispensed", &SlotcarPlugin::item_dispensed_cb,
+    this))
+  {
+    std::cerr << "Error subscribing to topic [/item_dispensed]" << std::endl;
+  }
+
+  if (!_ign_node.Subscribe("/item_ingested", &SlotcarPlugin::item_ingested_cb,
+    this))
+  {
+    std::cerr << "Error subscribing to topic [/item_ingested]" << std::endl;
   }
 }
 
@@ -193,39 +218,21 @@ std::vector<Eigen::Vector3d> SlotcarPlugin::get_obstacle_positions(
   return obstacle_positions;
 }
 
-std::vector<Entity> SlotcarPlugin::get_payloads(
-  ignition::math::Pose3d& slotcar_pose,
-  EntityComponentManager& ecm)
+void SlotcarPlugin::item_dispensed_cb(const ignition::msgs::UInt64_V& msg)
 {
-  std::vector<Entity> payloads;
-  ecm.Each<components::Model, components::Name, components::Pose,
-    components::Static>(
-    [&](const Entity& entity,
-    const components::Model*,
-    const components::Name* nm,
-    const components::Pose* pose,
-    const components::Static* is_static
-    ) -> bool
-    {
-      // Object should not be static
-      // It should not be part of infrastructure (doors / lifts)
-      // And it should be closer than the "stop" range (checked by common)
-      const auto payload_position = pose->Data().Pos();
-      if (is_static->Data() == false &&
-      _infrastructure.find(entity) == _infrastructure.end())
-      {
-        ignition::math::Vector3d vec_diff = slotcar_pose.CoordPositionSub(pose->Data());
-        float dist = vec_diff.Length();
-        //std::cout << "checking item: " << nm->Data() << "dist: " << dist << std::endl;
-        if(dist < 0.4)
-        {
-          std::cout << "adding payload: " << nm->Data() << std::endl;
-          payloads.push_back(entity);
-        }
-      }
-      return true;
-    });
-  return payloads;
+  if (msg.data_size() == 2 && msg.data(0) == _entity)
+  {
+    Entity new_payload = msg.data(1);
+    this->_payloads.insert(new_payload);
+  }
+}
+
+void SlotcarPlugin::item_ingested_cb(const ignition::msgs::UInt64& msg)
+{
+  if (msg.IsInitialized() && _payloads.find(msg.data()) != _payloads.end())
+  {
+    _payloads.erase(msg.data());
+  }
 }
 
 void SlotcarPlugin::PreUpdate(const UpdateInfo& info,
@@ -245,22 +252,28 @@ void SlotcarPlugin::PreUpdate(const UpdateInfo& info,
 
   auto pose = ecm.Component<components::Pose>(_entity)->Data();
   auto obstacle_positions = get_obstacle_positions(ecm);
-  auto payloads = get_payloads(pose, ecm);
 
   auto velocities =
     dataPtr->update(convert_pose(pose), obstacle_positions, time);
  
-  curr_time = time;
-  /*if(time - prev_time >= 1)
-  {
-    prev_time = time;
-    std::cout << "current actual velocity: " << ecm.Component<components::LinearVelocity>(_entity)->Data()[0] << ",  " << ecm.Component<components::AngularVelocity>(_entity)->Data()[2] << std::endl;
+  send_control_signals(ecm, velocities, _payloads, dt);
 
-    std::cout << "target velocities: " << velocities.first << " " << velocities.second << std::endl;
-    prev_time = time;
-  }*/
-
-  send_control_signals(ecm, velocities, payloads, dt);
+  Entity parent = _entity;
+  while(ecm.ParentEntity(parent)){
+    parent = ecm.ParentEntity(parent);
+  }
+  if (ecm.EntityHasComponentType(parent,
+      components::PhysicsEnginePlugin().TypeId())){
+        std::string _physics_plugin_name = ecm.Component<components::PhysicsEnginePlugin>(parent)->Data();
+        if(_physics_plugin_name == "ignition-physics-tpe-plugin")
+        {
+          phys_plugin = TPE;
+        }
+        else
+        {
+          phys_plugin = DEFAULT;
+        }
+  }
 }
 
 IGNITION_ADD_PLUGIN(

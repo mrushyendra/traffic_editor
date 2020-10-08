@@ -103,17 +103,17 @@ public:
   std::array<double, 2> calculate_control_signals(const std::array<double,
     2>& curr_velocities,
     const std::pair<double, double>& velocities,
-    const double dt);// const;
+    const double dt); // const;
 
   std::array<double, 2> calculate_joint_control_signals(
     const std::array<double, 2>& w_tire,
     const std::pair<double, double>& velocities,
-    const double dt);// const
+    const double dt); // const
 
   std::array<double, 2> calculate_model_control_signals(
     const std::array<double, 2>& curr_velocities,
     const std::pair<double, double>& velocities,
-    const double dt);// const
+    const double dt); // const
 
   void publish_robot_state(const double time);
 

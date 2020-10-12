@@ -53,6 +53,7 @@ private:
   rclcpp::Node::SharedPtr _ros_node;
 
   Entity _entity;
+  std::array<Entity, 2> joints;
   std::unordered_set<Entity> _payloads;
   std::unordered_set<Entity> _infrastructure;
 
@@ -118,13 +119,6 @@ void SlotcarPlugin::Configure(const Entity& entity,
   if (!ecm.EntityHasComponentType(entity,
     components::AxisAlignedBox().TypeId()))
     ecm.CreateComponent(entity, components::AxisAlignedBox());
-  // Initialize Linear/AngularVelocityCmd components to drive slotcar
-  if (!ecm.EntityHasComponentType(_entity,
-    components::LinearVelocityCmd().TypeId()))
-    ecm.CreateComponent(_entity, components::LinearVelocityCmd());
-  if (!ecm.EntityHasComponentType(_entity,
-    components::AngularVelocityCmd().TypeId()))
-    ecm.CreateComponent(_entity, components::AngularVelocityCmd());
 
   // Keep track of when a payload is dispensed onto/ingested from slotcar
   // Needed for TPE Plugin to know when to manually move payload via this plugin
@@ -145,23 +139,24 @@ void SlotcarPlugin::send_control_signals(EntityComponentManager& ecm,
   const std::unordered_set<Entity> payloads,
   const double dt)
 {
-  ignition::math::Vector3d old_lin_vel_cmd =
-    ecm.Component<components::LinearVelocityCmd>(_entity)->Data();
-  ignition::math::Vector3d old_ang_vel_cmd =
-    ecm.Component<components::AngularVelocityCmd>(_entity)->Data();
-  double v_robot = old_lin_vel_cmd[0];
-  double w_robot = old_ang_vel_cmd[2];
-
-  std::array<double, 2> target_vels;
-  target_vels = dataPtr->calculate_model_control_signals({v_robot, w_robot},
-      velocities, dt);
-  ecm.Component<components::LinearVelocityCmd>(_entity)->Data() = {
-    target_vels[0], old_lin_vel_cmd[1], old_lin_vel_cmd[2]};
-  ecm.Component<components::AngularVelocityCmd>(_entity)->Data() = {
-    old_ang_vel_cmd[0], old_ang_vel_cmd[1], target_vels[1]};
-
-  if (phys_plugin == TPE) // Need to manually move any payloads
+  if (phys_plugin == TPE)
   {
+    ignition::math::Vector3d old_lin_vel_cmd =
+      ecm.Component<components::LinearVelocityCmd>(_entity)->Data();
+    ignition::math::Vector3d old_ang_vel_cmd =
+      ecm.Component<components::AngularVelocityCmd>(_entity)->Data();
+    double v_robot = old_lin_vel_cmd[0];
+    double w_robot = old_ang_vel_cmd[2];
+
+    std::array<double, 2> target_vels;
+    target_vels = dataPtr->calculate_model_control_signals({v_robot, w_robot},
+        velocities, dt);
+    ecm.Component<components::LinearVelocityCmd>(_entity)->Data() = {
+      target_vels[0], old_lin_vel_cmd[1], old_lin_vel_cmd[2]};
+    ecm.Component<components::AngularVelocityCmd>(_entity)->Data() = {
+      old_ang_vel_cmd[0], old_ang_vel_cmd[1], target_vels[1]};
+
+    // Need to manually move any payloads
     for (const Entity& payload : payloads)
     {
       if (!ecm.EntityHasComponentType(payload,
@@ -180,6 +175,20 @@ void SlotcarPlugin::send_control_signals(EntityComponentManager& ecm,
         target_vels[0], old_lin_vel_cmd[1], old_lin_vel_cmd[2]};
       ecm.Component<components::AngularVelocityCmd>(payload)->Data() = {
         old_ang_vel_cmd[0], old_ang_vel_cmd[1], target_vels[1]};
+    }
+  }
+  else
+  {
+    std::array<double, 2> w_tire;
+    for (std::size_t i = 0; i < 2; ++i)
+      w_tire[i] =
+        ecm.Component<components::JointVelocity>(joints[i])->Data()[0];
+    auto joint_signals = dataPtr->calculate_joint_control_signals(w_tire,
+        velocities, dt);
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+      auto vel_cmd = ecm.Component<components::JointVelocityCmd>(joints[i]);
+      vel_cmd->Data()[0] = joint_signals[i];
     }
   }
 }
@@ -266,7 +275,8 @@ void SlotcarPlugin::item_ingested_cb(const ignition::msgs::Entity& msg)
 void SlotcarPlugin::PreUpdate(const UpdateInfo& info,
   EntityComponentManager& ecm)
 {
-  // Read from components that may not have been initialized in configure()
+  // Read from components that may not have been initialized in configure(),
+  // or depend on the PhysicsPlugin used
   if (first_iteration)
   {
     Entity parent = _entity;
@@ -284,6 +294,41 @@ void SlotcarPlugin::PreUpdate(const UpdateInfo& info,
         phys_plugin = plugin_names[physics_plugin_name];
       }
     }
+
+    if (phys_plugin == TPE)
+    {
+      // Initialize Linear/AngularVelocityCmd components to drive slotcar for TPE Physics engine
+      if (!ecm.EntityHasComponentType(_entity,
+        components::LinearVelocityCmd().TypeId()))
+        ecm.CreateComponent(_entity, components::LinearVelocityCmd());
+      if (!ecm.EntityHasComponentType(_entity,
+        components::AngularVelocityCmd().TypeId()))
+        ecm.CreateComponent(_entity, components::AngularVelocityCmd());
+    }
+    else
+    {
+      auto model = Model(_entity);
+      // Initialise JointVelocityCmd / JointVelocity components for DART physics engine
+      joints[0] = model.JointByName(ecm, "joint_tire_left");
+      if (!joints[0])
+        RCLCPP_ERROR(dataPtr->logger(),
+          "Could not find tire for [joint_tire_left]");
+
+      joints[1] = model.JointByName(ecm, "joint_tire_right");
+      if (!joints[1])
+        RCLCPP_ERROR(dataPtr->logger(),
+          "Could not find tire for [joint_tire_right]");
+      for (const auto& joint : joints)
+      {
+        if (!ecm.EntityHasComponentType(joint,
+          components::JointVelocityCmd().TypeId()))
+          ecm.CreateComponent(joint, components::JointVelocityCmd({0}));
+        if (!ecm.EntityHasComponentType(joint,
+          components::JointVelocity().TypeId()))
+          ecm.CreateComponent(joint, components::JointVelocity({0}));
+      }
+    }
+
     first_iteration = false;
   }
 
